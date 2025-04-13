@@ -39,6 +39,21 @@
       <option value="xlsx">XLSX</option>
       <option value="json">JSON</option>
     </select>
+    
+    <div class="cleanup-options">
+      <p><strong>Remove empty columns?</strong></p>
+      <label><input type="radio" name="removeEmptyColumns" value="yes" checked> Yes</label>
+      <label><input type="radio" name="removeEmptyColumns" value="no"> No</label>
+
+      <p><strong>Trim spaces from values?</strong></p>
+      <label><input type="radio" name="trimSpaces" value="yes" checked> Yes</label>
+      <label><input type="radio" name="trimSpaces" value="no"> No</label>
+
+      <p><strong>Normalize missing values (null, N/A)?</strong></p>
+      <label><input type="radio" name="normalizeMissing" value="yes" checked> Yes</label>
+      <label><input type="radio" name="normalizeMissing" value="no"> No</label>
+    </div>
+    
     <br /><br />
     <button id="submit-all">Continue</button>
   </div>
@@ -89,10 +104,18 @@
         });
   
         const outputFormat = document.getElementById('export-format').value;
+        const removeEmptyColumns = document.querySelector('input[name="removeEmptyColumns"]:checked').value;
+        const trimSpaces = document.querySelector('input[name="trimSpaces"]:checked').value;
+        const normalizeMissing = document.querySelector('input[name="normalizeMissing"]:checked').value;
   
         const config = {
           files: selections,
-          outputFormat
+          outputFormat,
+          cleanup: {
+            removeEmptyColumns,
+            trimSpaces,
+            normalizeMissing
+          }
         };
   
         if (window.api && typeof window.api.processFiles === 'function') {

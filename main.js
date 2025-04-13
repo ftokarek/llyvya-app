@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const Papa = require('papaparse');
 const XLSX = require('xlsx');
+const AdmZip = require('adm-zip');
+const os = require('os');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -22,7 +24,7 @@ ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Data Files', extensions: ['csv', 'txt', 'tsv', 'xlsx', 'json'] }
+      { name: 'Data Files', extensions: ['csv', 'txt', 'tsv', 'xlsx', 'json', 'zip'] }
     ]
   });
 
@@ -34,42 +36,127 @@ ipcMain.handle('open-file-dialog', async () => {
 
 ipcMain.handle('process-files', async (event, config) => {
   try {
-    let mergedData = [];
-    let headers = null;
-    let dotCount = 0;
-    let commaCount = 0;
+    let expandedFiles = [];
 
-    for (const fileConfig of config.files) {
-      const content = fs.readFileSync(fileConfig.file, 'utf8');
+    for (const f of config.files) {
+      const ext = path.extname(f.file || '').toLowerCase();
 
-      const parsed = Papa.parse(content, {
-        header: fileConfig.header === 'yes',
-        skipEmptyLines: true
-      });
+      if (ext === '.zip') {
+        const zip = new AdmZip(f.file);
+        const tempDir = path.join(os.tmpdir(), `unzip-${Date.now()}`);
+        zip.extractAllTo(tempDir, true);
 
-      let data = parsed.data;
+        const extracted = fs.readdirSync(tempDir).map(name => path.join(tempDir, name));
+        const supportedExts = ['.csv', '.txt', '.tsv', '.xlsx', '.json'];
 
-      if (fileConfig.header === 'no') {
-        if (!headers) {
-          headers = parsed.data[0].map((_, i) => `Column ${i + 1}`);
-        }
-
-        data = parsed.data.map(row => {
-          const obj = {};
-          headers.forEach((key, i) => {
-            obj[key] = row[i];
-          });
-          return obj;
+        extracted.forEach(ef => {
+          const fileExt = path.extname(ef).toLowerCase();
+          const isFile = fs.statSync(ef).isFile();
+          const isSupported = supportedExts.includes(fileExt);
+          if (isFile && isSupported) {
+            expandedFiles.push({ file: ef, header: 'yes', dedup: 'no' });
+          }
         });
       } else {
-        if (!headers) {
-          headers = parsed.meta.fields;
-        } else if (JSON.stringify(headers) !== JSON.stringify(parsed.meta.fields)) {
-          console.warn(`Header mismatch in file: ${fileConfig.file}`);
+        expandedFiles.push(f);
+      }
+    }
+
+    config.files = expandedFiles;
+
+    let allHeaders = [];
+    let dataByFile = [];
+    let dotCount = 0, commaCount = 0;
+
+    for (const fileConfig of config.files) {
+      const ext = path.extname(fileConfig.file).toLowerCase();
+      let data = [];
+      let fileHeaders = null;
+
+      if (['.csv', '.txt', '.tsv'].includes(ext)) {
+        const content = fs.readFileSync(fileConfig.file, 'utf8');
+        const parsed = Papa.parse(content, {
+          header: fileConfig.header === 'yes',
+          skipEmptyLines: true,
+          delimiter: ext === '.tsv' ? '\t' : undefined
+        });
+
+        if (fileConfig.header === 'no') {
+          fileHeaders = parsed.data[0].map((_, i) => `Column ${i + 1}`);
+          data = parsed.data.map(row => {
+            const obj = {};
+            fileHeaders.forEach((key, i) => {
+              obj[key] = row[i];
+            });
+            return obj;
+          });
+        } else {
+          fileHeaders = parsed.meta.fields;
+          data = parsed.data;
         }
+
+      } else if (ext === '.xlsx') {
+        const workbook = XLSX.readFile(fileConfig.file);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        fileHeaders = Object.keys(data[0] || {});
+      } else if (ext === '.json') {
+        const raw = fs.readFileSync(fileConfig.file, 'utf8');
+        data = JSON.parse(raw);
+        fileHeaders = Object.keys(data[0] || {});
+      } else {
+        console.warn(`Unsupported file format: ${fileConfig.file}`);
+        continue;
       }
 
-      if (fileConfig.dedup === 'yes') {
+      allHeaders.push({ file: fileConfig.file, headers: fileHeaders });
+      dataByFile.push({ data, dedup: fileConfig.dedup });
+    }
+
+    // check if headers are consistent
+    const firstHeader = allHeaders[0].headers;
+    const headersDiffer = allHeaders.some(h => JSON.stringify(h.headers) !== JSON.stringify(firstHeader));
+    const equalColumnCounts = allHeaders.every(h => h.headers.length === firstHeader.length);
+
+    let headers = firstHeader;
+
+    if (headersDiffer && equalColumnCounts) {
+      const confirmMerge = await dialog.showMessageBox({
+        type: 'question',
+        buttons: ['Yes', 'No'],
+        defaultId: 0,
+        message: 'Headers differ between files. Do you want to merge anyway?'
+      });
+
+      if (confirmMerge.response === 1) {
+        return { success: false };
+      }
+
+      const choice = await dialog.showMessageBox({
+        type: 'question',
+        buttons: allHeaders.map(h => path.basename(h.file)),
+        message: 'Choose which file\'s headers should be used in the final file.'
+      });
+
+      headers = allHeaders[choice.response].headers;
+    }
+
+    let mergedData = [];
+    for (let i = 0; i < dataByFile.length; i++) {
+      let data = dataByFile[i].data;
+      const dedup = dataByFile[i].dedup === 'yes';
+
+      data = data.map(row => {
+        const newRow = {};
+        headers.forEach((key, i) => {
+          const val = Object.values(row)[i];
+          newRow[key] = val;
+        });
+        return newRow;
+      });
+
+      if (dedup) {
         const seen = new Set();
         data = data.filter(row => {
           const key = JSON.stringify(row);
@@ -80,6 +167,18 @@ ipcMain.handle('process-files', async (event, config) => {
       }
 
       mergedData = mergedData.concat(data);
+    }
+
+    for (const file of dataByFile) {
+      for (const row of file.data) {
+        for (const key in row) {
+          const val = row[key];
+          if (typeof val === 'string') {
+            if (val.match(/^\d+,\d+$/)) commaCount++;
+            if (val.match(/^\d+\.\d+$/)) dotCount++;
+          }
+        }
+      }
     }
 
     let maxPrecision = 0;
@@ -96,6 +195,46 @@ ipcMain.handle('process-files', async (event, config) => {
       }
     });
 
+    if (config.cleanup) {
+      const normalizeValues = ['null', 'NULL', 'n/a', 'N/A', '-', '(blank)'];
+
+      if (config.cleanup.trimSpaces === 'yes' || config.cleanup.normalizeMissing === 'yes') {
+        mergedData = mergedData.map(row => {
+          const newRow = {};
+          for (const key in row) {
+            let val = row[key];
+            if (typeof val === 'string') {
+              if (config.cleanup.trimSpaces === 'yes') {
+                val = val.trim();
+              }
+              if (config.cleanup.normalizeMissing === 'yes' && normalizeValues.includes(val)) {
+                val = '';
+              }
+            }
+            newRow[key] = val;
+          }
+          return newRow;
+        });
+      }
+
+      if (config.cleanup.removeEmptyColumns === 'yes' && mergedData.length > 0) {
+        const allKeys = Object.keys(mergedData[0]);
+        const keysToKeep = allKeys.filter(key =>
+          mergedData.some(row => {
+            const val = row[key];
+            return val !== '' && val !== null && val !== undefined;
+          })
+        );
+        mergedData = mergedData.map(row => {
+          const newRow = {};
+          keysToKeep.forEach(key => {
+            newRow[key] = row[key];
+          });
+          return newRow;
+        });
+      }
+    }
+
     const { response } = await dialog.showMessageBox({
       type: 'question',
       buttons: ['Comma (1,50)', 'Dot (1.50)'],
@@ -108,12 +247,12 @@ ipcMain.handle('process-files', async (event, config) => {
       const newRow = {};
       for (const key in row) {
         let val = row[key];
-        if (typeof val === 'string') {
-          if (val.match(/^\d+[.,]\d+$/)) {
-            let num = val.replace(',', '.');
-            if (!isNaN(parseFloat(num))) {
-              val = parseFloat(num).toFixed(maxPrecision).replace('.', useComma ? ',' : '.');
-            }
+        if (typeof val === 'string' || typeof val === 'number') {
+          let raw = String(val).replace(',', '.');
+          let num = Number(raw);
+          if (!isNaN(num) && isFinite(num)) {
+            let formatted = num.toFixed(maxPrecision);
+            val = useComma ? formatted.replace('.', ',') : formatted;
           }
         }
         newRow[key] = val;
