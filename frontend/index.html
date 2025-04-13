@@ -6,5 +6,15 @@
     <title>Llyvya</title>
 </head>
 <body>
+    <script>
+        window.api.ping().then(response => 
+        {
+            document.body.innerHTML = `<h2>Backend says: ${response.message}</h2>`;
+        }).catch(err => 
+        {
+            document.body.innerHTML = `<h2 style="color:red">Connection failed</h2>`;
+            console.error(err);
+        });
+    </script>
 </body>
 </html>
