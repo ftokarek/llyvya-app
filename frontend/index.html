@@ -6,14 +6,44 @@
     <title>Llyvya</title>
 </head>
 <body>
+    <button id="import-btn">Import files</button>
+    <div id="output"></div>
+
     <script>
-        window.api.ping().then(response => 
+        document.getElementById('import-btn').addEventListener('click', async () => 
         {
-            document.body.innerHTML = `<h2>Backend says: ${response.message}</h2>`;
-        }).catch(err => 
-        {
-            document.body.innerHTML = `<h2 style="color:red">Connection failed</h2>`;
-            console.error(err);
+            const result = await window.api.mergeCsvFiles();
+            const output = document.getElementById('output');
+            output.innerHTML = '';
+
+            if (!result) {
+                output.innerHTML = '<p style="color: red;">Import failed or headers mismatch.</p>';
+                return;
+            }
+
+            const { headers, data } = result;
+
+            let table = '<table border="1"><thead><tr>';
+
+            headers.forEach(header => 
+            {
+                table += `<th>${header}</th>`;
+            });
+
+            table += '</tr></thead><tbody>';
+
+            data.forEach(row => 
+            {
+                table += '<tr>';
+                headers.forEach(header => 
+                {
+                    table += `<td>${row[header] ?? ''}</td>`;
+                });
+                table += '</tr>';
+            });
+
+            table += '</tbody></table>';
+            output.innerHTML = table;
         });
     </script>
 </body>
