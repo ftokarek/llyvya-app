@@ -110,7 +110,7 @@
       handleImportedFiles({ files: merged });
     });
 
-    function handleImportedFiles(result) {
+    async function handleImportedFiles(result) {
       window.currentFiles = result.files;
 
       if (!result || !result.files || result.files.length === 0) {
@@ -121,33 +121,87 @@
       const container = document.getElementById('form-container');
       container.innerHTML = '';
 
-      result.files.forEach((filename, index) => {
+      for (const [index, filename] of result.files.entries()) {
         const section = document.createElement('div');
         section.className = 'file-section';
-        section.innerHTML = `
-          <h3>${filename.file.split(/[\\/]/).pop()}</h3>
-          <div class="options">
-            <label>Does this file contain headers?</label>
-            <input type="radio" name="header-${index}" value="yes" checked> Yes
-            <input type="radio" name="header-${index}" value="no"> No
-            <br />
-            <label>Remove duplicates?</label>
-            <input type="radio" name="dedupe-${index}" value="yes"> Yes
-            <input type="radio" name="dedupe-${index}" value="no" checked> No
-          </div>
-        `;
+        section.innerHTML = `<h3>${filename.file.split(/[\\/]/).pop()}</h3>`;
+
+        if (filename.file.endsWith('.xlsx')) {
+          const sheetsData = await window.api.getXlsxSheets(filename.file);
+          sheetsData.forEach((sheet, sheetIdx) => {
+            const sheetSection = document.createElement('div');
+            sheetSection.innerHTML = `
+              <label><input type="checkbox" id="include-${index}-${sheetIdx}" checked> ${sheet}</label><br>
+              <label>Does this sheet contain headers?</label>
+              <input type="radio" name="header-${index}-${sheetIdx}" value="yes" checked> Yes
+              <input type="radio" name="header-${index}-${sheetIdx}" value="no"> No
+              <br />
+              <label>Remove duplicates?</label>
+              <input type="radio" name="dedupe-${index}-${sheetIdx}" value="yes"> Yes
+              <input type="radio" name="dedupe-${index}-${sheetIdx}" value="no" checked> No
+            `;
+            section.appendChild(sheetSection);
+          });
+        } else {
+          section.innerHTML += `
+            <div class="options">
+              <label>Does this file contain headers?</label>
+              <input type="radio" name="header-${index}" value="yes" checked> Yes
+              <input type="radio" name="header-${index}" value="no"> No
+              <br />
+              <label>Remove duplicates?</label>
+              <input type="radio" name="dedupe-${index}" value="yes"> Yes
+              <input type="radio" name="dedupe-${index}" value="no" checked> No
+            </div>
+          `;
+        }
+
         container.appendChild(section);
-      });
+      }
 
       document.getElementById('global-options').style.display = 'block';
 
-      document.getElementById('submit-all').addEventListener('click', () => {
+      document.getElementById('submit-all').addEventListener('click', async () => {
+        let atLeastOneSelected = false;
+
+        for (const [index, filename] of result.files.entries()) {
+          if (filename.file.endsWith('.xlsx')) {
+            const sheetsData = await window.api.getXlsxSheets(filename.file);
+            for (let sheetIdx = 0; sheetIdx < sheetsData.length; sheetIdx++) {
+              if (document.getElementById(`include-${index}-${sheetIdx}`).checked) {
+                atLeastOneSelected = true;
+                break;
+              }
+            }
+          } else {
+            atLeastOneSelected = true;
+          }
+          if (atLeastOneSelected) break;
+        }
+
+        if (!atLeastOneSelected) {
+          alert('No data selected. Please select at least one sheet or file to continue.');
+          return;
+        }
+
         const selections = result.files.map((filename, index) => {
-          return {
-            file: filename.file,
-            header: document.querySelector(`input[name="header-${index}"]:checked`).value,
-            dedup: document.querySelector(`input[name="dedupe-${index}"]:checked`).value
-          };
+          if (filename.file.endsWith('.xlsx')) {
+            const sheets = sheetsData.map((sheet, sheetIdx) => {
+              return {
+                sheet,
+                include: document.getElementById(`include-${index}-${sheetIdx}`).checked,
+                header: document.querySelector(`input[name="header-${index}-${sheetIdx}"]:checked`).value,
+                dedup: document.querySelector(`input[name="dedupe-${index}-${sheetIdx}"]:checked`).value
+              };
+            });
+            return { file: filename.file, sheets };
+          } else {
+            return {
+              file: filename.file,
+              header: document.querySelector(`input[name="header-${index}"]:checked`).value,
+              dedup: document.querySelector(`input[name="dedupe-${index}"]:checked`).value
+            };
+          }
         });
 
         const outputFormat = document.getElementById('export-format').value;

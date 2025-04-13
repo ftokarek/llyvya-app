@@ -97,10 +97,48 @@ ipcMain.handle('process-files', async (event, config) => {
 
       } else if (ext === '.xlsx') {
         const workbook = XLSX.readFile(fileConfig.file);
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        fileHeaders = Object.keys(data[0] || {});
+        const selectedSheets = fileConfig.sheets;
+
+        if (!Array.isArray(selectedSheets) || selectedSheets.length === 0) {
+          console.warn(`No sheets selected for: ${fileConfig.file}`);
+          continue;
+        }
+
+        for (const sheetName of selectedSheets) {
+          if (!workbook.SheetNames.includes(sheetName)) {
+            console.warn(`Sheet ${sheetName} not found in ${fileConfig.file}`);
+            continue;
+          }
+
+          const sheet = workbook.Sheets[sheetName];
+          const hasHeader = fileConfig.sheetHeader?.[sheetName] === 'yes';
+          let sheetData, headers;
+
+          if (hasHeader) {
+            sheetData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            headers = Object.keys(sheetData[0] || {});
+          } else {
+            const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+            headers = raw[0].map((_, i) => `Column ${i + 1}`);
+            sheetData = raw.map(row => {
+              const obj = {};
+              headers.forEach((key, i) => {
+                obj[key] = row[i];
+              });
+              return obj;
+            });
+          }
+
+          allHeaders.push({ file: `${fileConfig.file}::${sheetName}`, headers });
+          dataByFile.push({
+            data: sheetData,
+            dedup: fileConfig.sheetDedup?.[sheetName] === 'yes',
+            label: `${fileConfig.file}::${sheetName}`,
+            header: hasHeader ? 'yes' : 'no'
+          });
+        }
+
+        continue; // skip push below
       } else if (ext === '.json') {
         const raw = fs.readFileSync(fileConfig.file, 'utf8');
         data = JSON.parse(raw);
@@ -112,6 +150,12 @@ ipcMain.handle('process-files', async (event, config) => {
 
       allHeaders.push({ file: fileConfig.file, headers: fileHeaders });
       dataByFile.push({ data, dedup: fileConfig.dedup });
+    }
+
+    // override global headers if at least one XLSX source had headers
+    const firstHeaderSourceWithHeaders = allHeaders.find(h => h.headers && h.headers.length && h.file.includes('::') && h.header === 'yes');
+    if (firstHeaderSourceWithHeaders) {
+      headers = firstHeaderSourceWithHeaders.headers;
     }
 
     // check if headers are consistent
@@ -321,4 +365,14 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+ipcMain.handle('get-xlsx-sheets', async (event, filePath) => {
+  try {
+    const workbook = XLSX.readFile(filePath);
+    return workbook.SheetNames;
+  } catch (error) {
+    console.error('get-xlsx-sheets error:', error);
+    return [];
+  }
 });

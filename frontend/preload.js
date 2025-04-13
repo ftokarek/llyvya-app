@@ -18,5 +18,10 @@ contextBridge.exposeInMainWorld('api', {
   mergeCsvFilesFromDrop: async (filePaths) => {
     const result = await ipcRenderer.invoke('merge-csv-files-from-drop', filePaths);
     return result;
+  },
+
+  getXlsxSheets: async (filePath) => {
+    const sheets = await ipcRenderer.invoke('get-xlsx-sheets', filePath);
+    return sheets;
   }
 });
