@@ -13,5 +13,10 @@ contextBridge.exposeInMainWorld('api', {
     } else {
       alert('Something went wrong while processing the files.');
     }
+  },
+
+  mergeCsvFilesFromDrop: async (filePaths) => {
+    const result = await ipcRenderer.invoke('merge-csv-files-from-drop', filePaths);
+    return result;
   }
 });

@@ -28,7 +28,9 @@
 </head>
 <body>
   <h1>Llyvya</h1>
-  <button id="import-btn">Import files</button>
+  <div id="dropzone" style="border: 2px dashed #aaa; padding: 40px; text-align: center; cursor: pointer; margin-bottom: 20px;">
+    <p>Click or drag and drop files here to import</p>
+  </div>
   <div id="form-container"></div>
   <div class="global-options" id="global-options" style="display: none;">
     <label for="export-format">Export as</label>
@@ -59,26 +61,71 @@
   </div>
 
   <script>
-    document.getElementById('import-btn').addEventListener('click', async () => {
+    const dropzone = document.getElementById('dropzone');
+
+    dropzone.addEventListener('click', async () => {
       if (!window.api || !window.api.mergeCsvFiles) {
         alert('mergeCsvFiles not available');
         return;
       }
-  
+
       const result = await window.api.mergeCsvFiles();
+      if (!result || !result.files || result.files.length === 0) return;
+
+      const existing = window.currentFiles || [];
+      const merged = [...existing, ...result.files.map(f => ({ file: f, header: 'yes', dedup: 'no' }))];
+      window.currentFiles = merged;
+
+      handleImportedFiles({ files: merged });
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = '#000';
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.borderColor = '#aaa';
+    });
+
+    dropzone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = '#aaa';
+      if (!window.api || typeof window.api.mergeCsvFilesFromDrop !== 'function') {
+        alert('Drag & drop not supported.');
+        return;
+      }
+
+      const fileList = [...e.dataTransfer.files].map(file => file.path);
+
+      if (!fileList.length) {
+        alert('No valid files dropped.');
+        return;
+      }
+
+      const dropped = fileList.map(f => ({ file: f, header: 'yes', dedup: 'no' }));
+      const existing = window.currentFiles || [];
+      const merged = [...existing, ...dropped];
+      window.currentFiles = merged;
+      handleImportedFiles({ files: merged });
+    });
+
+    function handleImportedFiles(result) {
+      window.currentFiles = result.files;
+
       if (!result || !result.files || result.files.length === 0) {
         alert('No files selected.');
         return;
       }
-  
+
       const container = document.getElementById('form-container');
       container.innerHTML = '';
-  
+
       result.files.forEach((filename, index) => {
         const section = document.createElement('div');
         section.className = 'file-section';
         section.innerHTML = `
-          <h3>${filename.split(/[\\/]/).pop()}</h3>
+          <h3>${filename.file.split(/[\\/]/).pop()}</h3>
           <div class="options">
             <label>Does this file contain headers?</label>
             <input type="radio" name="header-${index}" value="yes" checked> Yes
@@ -91,23 +138,23 @@
         `;
         container.appendChild(section);
       });
-  
+
       document.getElementById('global-options').style.display = 'block';
-  
+
       document.getElementById('submit-all').addEventListener('click', () => {
         const selections = result.files.map((filename, index) => {
           return {
-            file: filename,
+            file: filename.file,
             header: document.querySelector(`input[name="header-${index}"]:checked`).value,
             dedup: document.querySelector(`input[name="dedupe-${index}"]:checked`).value
           };
         });
-  
+
         const outputFormat = document.getElementById('export-format').value;
         const removeEmptyColumns = document.querySelector('input[name="removeEmptyColumns"]:checked').value;
         const trimSpaces = document.querySelector('input[name="trimSpaces"]:checked').value;
         const normalizeMissing = document.querySelector('input[name="normalizeMissing"]:checked').value;
-  
+
         const config = {
           files: selections,
           outputFormat,
@@ -117,14 +164,14 @@
             normalizeMissing
           }
         };
-  
+
         if (window.api && typeof window.api.processFiles === 'function') {
           window.api.processFiles(config);
         } else {
           alert('processFiles not available.');
         }
       });
-    });
+    }
   </script>
 </body>
 </html>
