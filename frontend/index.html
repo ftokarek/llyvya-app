@@ -1,50 +1,107 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Llyvya</title>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Llyvya</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    .file-section {
+      margin-bottom: 20px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 15px;
+    }
+    .file-section h3 {
+      margin-bottom: 5px;
+    }
+    .options label {
+      margin-right: 15px;
+    }
+    .global-options {
+      margin-top: 30px;
+    }
+  </style>
 </head>
 <body>
-    <button id="import-btn">Import files</button>
-    <div id="output"></div>
+  <h1>Llyvya</h1>
+  <button id="import-btn">Import files</button>
+  <div id="form-container"></div>
+  <div class="global-options" id="global-options" style="display: none;">
+    <label for="export-format">Export as</label>
+    <select id="export-format">
+      <option value="csv">CSV</option>
+      <option value="txt">TXT</option>
+      <option value="tsv">TSV</option>
+      <option value="xlsx">XLSX</option>
+      <option value="json">JSON</option>
+    </select>
+    <br /><br />
+    <button id="submit-all">Continue</button>
+  </div>
 
-    <script>
-        document.getElementById('import-btn').addEventListener('click', async () => 
-        {
-            const result = await window.api.mergeCsvFiles();
-            const output = document.getElementById('output');
-            output.innerHTML = '';
-
-            if (!result) {
-                output.innerHTML = '<p style="color: red;">Import failed or headers mismatch.</p>';
-                return;
-            }
-
-            const { headers, data } = result;
-
-            let table = '<table border="1"><thead><tr>';
-
-            headers.forEach(header => 
-            {
-                table += `<th>${header}</th>`;
-            });
-
-            table += '</tr></thead><tbody>';
-
-            data.forEach(row => 
-            {
-                table += '<tr>';
-                headers.forEach(header => 
-                {
-                    table += `<td>${row[header] ?? ''}</td>`;
-                });
-                table += '</tr>';
-            });
-
-            table += '</tbody></table>';
-            output.innerHTML = table;
+  <script>
+    document.getElementById('import-btn').addEventListener('click', async () => {
+      if (!window.api || !window.api.mergeCsvFiles) {
+        alert('mergeCsvFiles not available');
+        return;
+      }
+  
+      const result = await window.api.mergeCsvFiles();
+      if (!result || !result.files || result.files.length === 0) {
+        alert('No files selected.');
+        return;
+      }
+  
+      const container = document.getElementById('form-container');
+      container.innerHTML = '';
+  
+      result.files.forEach((filename, index) => {
+        const section = document.createElement('div');
+        section.className = 'file-section';
+        section.innerHTML = `
+          <h3>${filename.split(/[\\/]/).pop()}</h3>
+          <div class="options">
+            <label>Does this file contain headers?</label>
+            <input type="radio" name="header-${index}" value="yes" checked> Yes
+            <input type="radio" name="header-${index}" value="no"> No
+            <br />
+            <label>Remove duplicates?</label>
+            <input type="radio" name="dedupe-${index}" value="yes"> Yes
+            <input type="radio" name="dedupe-${index}" value="no" checked> No
+          </div>
+        `;
+        container.appendChild(section);
+      });
+  
+      document.getElementById('global-options').style.display = 'block';
+  
+      document.getElementById('submit-all').addEventListener('click', () => {
+        const selections = result.files.map((filename, index) => {
+          return {
+            file: filename,
+            header: document.querySelector(`input[name="header-${index}"]:checked`).value,
+            dedup: document.querySelector(`input[name="dedupe-${index}"]:checked`).value
+          };
         });
-    </script>
+  
+        const outputFormat = document.getElementById('export-format').value;
+  
+        const config = {
+          files: selections,
+          outputFormat
+        };
+  
+        if (window.api && typeof window.api.processFiles === 'function') {
+          window.api.processFiles(config);
+        } else {
+          alert('processFiles not available.');
+        }
+      });
+    });
+  </script>
 </body>
 </html>
