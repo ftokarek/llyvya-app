@@ -21,6 +21,7 @@ function createWindow() {
 }
 
 ipcMain.handle('open-file-dialog', async () => {
+  console.log('open-file-dialog invoked'); // Logging invocation
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [
@@ -28,6 +29,7 @@ ipcMain.handle('open-file-dialog', async () => {
     ]
   });
 
+  console.log('Dialog result:', result); // Logging dialog result
   return {
     canceled: result.canceled,
     files: result.canceled ? [] : result.filePaths
@@ -35,6 +37,7 @@ ipcMain.handle('open-file-dialog', async () => {
 });
 
 ipcMain.handle('process-files', async (event, config) => {
+  console.log('Received config from frontend:', config); // Logging configuration
   try {
     let expandedFiles = [];
 

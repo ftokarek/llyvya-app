@@ -2,7 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   mergeCsvFiles: async () => {
+    console.log('mergeCsvFiles invoked'); // Logging invocation
     const result = await ipcRenderer.invoke('open-file-dialog');
+    console.log('Result from open-file-dialog:', result); // Logging result
     return result;
   },
 
